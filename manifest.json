@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Upload Date & Time (Below Title)",
-  "version": "2.1",
+  "version": "1.0.0",
   "description": "Shows exact upload date + time in your local timezone right BELOW the video title.",
   "icons": {
     "48": "icon48.png",
