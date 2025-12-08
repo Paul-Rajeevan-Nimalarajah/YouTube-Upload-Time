@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Upload Date & Time (Below Title)",
+  "version": "2.1",
+  "description": "Shows exact upload date + time in your local timezone right BELOW the video title.",
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],  // ← Changed: Covers home → watch navigation
+      "js": ["content.js"],
+      "run_at": "document_end"  // ← Changed: Runs sooner, before full idle
+    }
+  ],
+  "host_permissions": ["*://*.youtube.com/*"],
+  "web_accessible_resources": [
+    {
+      "resources": ["icon48.png", "icon128.png"],
+      "matches": ["*://*.youtube.com/*"]
+    }
+  ]
+}
