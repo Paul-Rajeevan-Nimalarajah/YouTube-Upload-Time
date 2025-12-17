@@ -1,144 +1,104 @@
-// ==UserScript==
-// @name         YouTube Upload Date & Time (Below Title - JSON-LD Fix)
-// @namespace    http://tampermonkey.net/
-// @version      3.0
-// @description  Shows exact upload date + time in your local timezone right BELOW the video title. Uses JSON-LD for reliability.
-// @author       You
-// @match        *://*.youtube.com/*
-// @grant        none
-// ==/UserScript==
-
 (function () {
     'use strict';
 
-    // Format ISO date → nice local date & time
+    const DATE_ID = 'local-upload-date-below-title';
+    let titleObserver = null;
+
     function formatDate(isoString) {
         const date = new Date(isoString);
         if (isNaN(date)) return null;
-
         return new Intl.DateTimeFormat(undefined, {
             year: 'numeric',
             month: 'long',
             day: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
-            hour12: false,          // set to true if you want 12-hour (AM/PM)
-            // timeZoneName: 'short' // Uncomment to add IST, PST, etc.
+            hour12: false
         }).format(date);
     }
 
+    function getUploadDate() {
+        const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+        for (const script of scripts) {
+            try {
+                let data = JSON.parse(script.textContent);
+                if (!Array.isArray(data)) data = [data];
+                for (const item of data) {
+                    if (item['@type'] === 'VideoObject' && item.uploadDate) {
+                        return item.uploadDate;
+                    }
+                }
+            } catch {}
+        }
+        return null;
+    }
+
     function addUploadDateBelowTitle() {
-        // Only run on watch pages
         if (!location.pathname.startsWith('/watch')) return;
+        if (document.getElementById(DATE_ID)) return;
 
-        // Parse upload date from JSON-LD (reliable source)
-        const jsonLdScript = document.querySelector('script[type="application/ld+json"]');
-        if (!jsonLdScript) return;
-
-        let jsonLd;
-        try {
-            jsonLd = JSON.parse(jsonLdScript.textContent);
-            if (!Array.isArray(jsonLd)) jsonLd = [jsonLd]; // Sometimes it's an array
-        } catch (e) {
-            return;
-        }
-
-        let uploadIso = null;
-        for (const item of jsonLd) {
-            if (item['@type'] === 'VideoObject' && item.uploadDate) {
-                uploadIso = item.uploadDate;
-                break;
-            }
-        }
+        const uploadIso = getUploadDate();
         if (!uploadIso) return;
 
         const niceDate = formatDate(uploadIso);
         if (!niceDate) return;
 
-        // Prevent adding multiple times
-        if (document.getElementById('local-upload-date-below-title')) return;
-
-        // Precise title selector for 2025 layout
-        const titleElement = document.querySelector('ytd-watch-flexy #title h1 yt-formatted-string');
-        if (!titleElement) return;
+        const titleWrapper = document.querySelector('ytd-watch-flexy #title');
+        if (!titleWrapper) return;
 
         const container = document.createElement('div');
-        container.id = 'local-upload-date-below-title';
+        container.id = DATE_ID;
         container.textContent = `Uploaded on ${niceDate}`;
         container.style.cssText = `
-            margin-top: 8px;
-            font-size: 15px;
+            margin-top: 4px;
+            font-size: 14px;
             color: var(--yt-spec-text-secondary);
             font-weight: 400;
             line-height: 1.4;
+            display: block;
         `;
 
-        // Insert after the title element
-        titleElement.parentNode.appendChild(container);
+        if (titleWrapper.parentNode) {
+            titleWrapper.parentNode.insertBefore(container, titleWrapper.nextSibling);
+        }
 
-        console.log('✅ Upload date added via JSON-LD!'); // Debug: Check console (F12)
+        observeTitleChanges();
     }
 
-    // Aggressive polling: Every 100ms for up to 20s (catches JS injection)
-    let pollInterval;
-    function startPolling() {
-        if (pollInterval) return;
-        let attempts = 0;
-        const maxAttempts = 200; // 20 seconds
-        pollInterval = setInterval(() => {
-            attempts++;
-            addUploadDateBelowTitle();
-            if (document.getElementById('local-upload-date-below-title') || attempts >= maxAttempts) {
-                clearInterval(pollInterval);
-                pollInterval = null;
-                console.log('⏹️ Polling stopped after', attempts, 'attempts');
-            }
-        }, 100);
-    }
+    function observeTitleChanges() {
+        if (titleObserver) return;
 
-    // YouTube SPA events
-    function setupNavigationListeners() {
-        const finishHandler = () => {
-            if (pollInterval) clearInterval(pollInterval);
-            setTimeout(() => {
+        const titleContainer = document.querySelector('ytd-watch-flexy #title');
+        if (!titleContainer) return;
+
+        titleObserver = new MutationObserver(() => {
+            if (!document.getElementById(DATE_ID)) {
                 addUploadDateBelowTitle();
-                startPolling();
-            }, 200);
-        };
-        const startHandler = () => {
-            const oldDate = document.getElementById('local-upload-date-below-title');
-            if (oldDate) oldDate.remove();
-        };
-
-        document.addEventListener('yt-navigate-finish', finishHandler);
-        document.addEventListener('yt-navigate-start', startHandler);
-    }
-
-    // Init on DOM ready
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            setupNavigationListeners();
-            addUploadDateBelowTitle();
-            startPolling();
+            }
         });
-    } else {
-        setupNavigationListeners();
-        addUploadDateBelowTitle();
-        startPolling();
+
+        titleObserver.observe(titleContainer, {
+            childList: true,
+            subtree: true
+        });
     }
 
-    // Extra layers
-    window.addEventListener('load', () => {
-        addUploadDateBelowTitle();
-        if (!pollInterval) startPolling();
-    });
-    setTimeout(addUploadDateBelowTitle, 0);
-    setTimeout(addUploadDateBelowTitle, 1000);
+    function reset() {
+        const old = document.getElementById(DATE_ID);
+        if (old) old.remove();
 
-    window.addEventListener('popstate', () => {
-        setTimeout(() => {
-            addUploadDateBelowTitle();
-            startPolling();
-        }, 200);
+        if (titleObserver) {
+            titleObserver.disconnect();
+            titleObserver = null;
+        }
+    }
+
+    document.addEventListener('yt-navigate-start', reset);
+    document.addEventListener('yt-navigate-finish', () => {
+        setTimeout(addUploadDateBelowTitle, 200);
     });
+
+    addUploadDateBelowTitle();
+    window.addEventListener('load', addUploadDateBelowTitle);
+
 })();
