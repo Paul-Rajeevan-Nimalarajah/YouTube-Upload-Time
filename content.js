@@ -2,7 +2,7 @@
     'use strict';
 
     const DATE_ID = 'local-upload-date-below-title';
-    let titleObserver = null;
+    let lastVideoId = null;
 
     function formatDate(isoString) {
         const date = new Date(isoString);
@@ -17,13 +17,17 @@
         }).format(date);
     }
 
+    function getVideoId() {
+        return new URLSearchParams(location.search).get('v');
+    }
+
     function getUploadDate() {
         const scripts = document.querySelectorAll('script[type="application/ld+json"]');
         for (const script of scripts) {
             try {
-                let data = JSON.parse(script.textContent);
-                if (!Array.isArray(data)) data = [data];
-                for (const item of data) {
+                const data = JSON.parse(script.textContent);
+                const items = Array.isArray(data) ? data : [data];
+                for (const item of items) {
                     if (item['@type'] === 'VideoObject' && item.uploadDate) {
                         return item.uploadDate;
                     }
@@ -33,72 +37,60 @@
         return null;
     }
 
-    function addUploadDateBelowTitle() {
+    function removeOld() {
+        const old = document.getElementById(DATE_ID);
+        if (old) old.remove();
+    }
+
+    function insertDate() {
         if (!location.pathname.startsWith('/watch')) return;
-        if (document.getElementById(DATE_ID)) return;
+
+        const videoId = getVideoId();
+        if (!videoId || videoId === lastVideoId) return;
 
         const uploadIso = getUploadDate();
         if (!uploadIso) return;
 
-        const niceDate = formatDate(uploadIso);
-        if (!niceDate) return;
+        const title = document.querySelector('ytd-watch-flexy #title');
+        if (!title) return;
 
-        const titleWrapper = document.querySelector('ytd-watch-flexy #title');
-        if (!titleWrapper) return;
+        removeOld();
 
-        const container = document.createElement('div');
-        container.id = DATE_ID;
-        container.textContent = `Uploaded on ${niceDate}`;
-        container.style.cssText = `
+        const dateText = formatDate(uploadIso);
+        if (!dateText) return;
+
+        const el = document.createElement('div');
+        el.id = DATE_ID;
+        el.textContent = `Uploaded on ${dateText}`;
+        el.style.cssText = `
             margin-top: 4px;
             font-size: 14px;
             color: var(--yt-spec-text-secondary);
             font-weight: 400;
             line-height: 1.4;
-            display: block;
         `;
 
-        if (titleWrapper.parentNode) {
-            titleWrapper.parentNode.insertBefore(container, titleWrapper.nextSibling);
-        }
-
-        observeTitleChanges();
+        title.parentNode?.insertBefore(el, title.nextSibling);
+        lastVideoId = videoId;
     }
 
-    function observeTitleChanges() {
-        if (titleObserver) return;
-
-        const titleContainer = document.querySelector('ytd-watch-flexy #title');
-        if (!titleContainer) return;
-
-        titleObserver = new MutationObserver(() => {
-            if (!document.getElementById(DATE_ID)) {
-                addUploadDateBelowTitle();
+    function waitForJsonLdAndInsert() {
+        let attempts = 0;
+        const interval = setInterval(() => {
+            attempts++;
+            if (getUploadDate()) {
+                clearInterval(interval);
+                insertDate();
             }
-        });
-
-        titleObserver.observe(titleContainer, {
-            childList: true,
-            subtree: true
-        });
+            if (attempts > 20) clearInterval(interval);
+        }, 300);
     }
 
-    function reset() {
-        const old = document.getElementById(DATE_ID);
-        if (old) old.remove();
-
-        if (titleObserver) {
-            titleObserver.disconnect();
-            titleObserver = null;
-        }
-    }
-
-    document.addEventListener('yt-navigate-start', reset);
     document.addEventListener('yt-navigate-finish', () => {
-        setTimeout(addUploadDateBelowTitle, 200);
+        lastVideoId = null;
+        removeOld();
+        waitForJsonLdAndInsert();
     });
 
-    addUploadDateBelowTitle();
-    window.addEventListener('load', addUploadDateBelowTitle);
-
+    waitForJsonLdAndInsert();
 })();
